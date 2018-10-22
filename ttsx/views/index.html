@@ -1,0 +1,73 @@
+
+<div class="search_bar clearfix">
+    <a href="/showindex" class="logo fl"><img src="/static/images/logo.png"></a>
+    <div class="search_con fl">
+        <form method="post" action="/searchGoods">
+        <input type="text" class="input_text fl" name="goodsName" placeholder="搜索商品">
+            <input type="submit" class="input_btn fr" name="" value="搜索">
+        </form>
+    </div>
+</div>
+	<div class="navbar_con">
+		<div class="navbar">
+			<h1 class="fl">全部商品分类</h1>
+			<ul class="navlist fl">
+				<li><a href="/comeindex">首页</a></li>
+				<li class="interval">|</li>
+				<li><a href="">手机生鲜</a></li>
+				<li class="interval">|</li>
+				<li><a href="">抽奖</a></li>
+			</ul>
+		</div>
+	</div>
+
+	<div class="center_con clearfix">
+		<ul class="subnav fl">
+			{{range .types}}
+			<li><a href="/list?id={{.Id}}&oder=1" class="{{.Logo}}">{{.Name}}</a></li>
+			{{end}}
+		</ul>
+		<div class="slide fl">
+			<ul class="slide_pics">
+				{{range .lunbotus}}
+					<li><img src="http://192.168.110.111:8888/{{.Image}}" alt="幻灯片"></li>
+				{{end}}
+			</ul>
+			<div class="prev"></div>
+			<div class="next"></div>
+			<ul class="points"></ul>
+		</div>
+		<div class="adv fl">
+			{{range .promotionBanner}}
+			<a href="{{.Url}}"><img src="http://192.168.110.111:8888/{{.Image}}"></a>
+			{{end}}
+		</div>
+	</div>
+{{range .goods}}
+	<div class="list_model">
+		<div class="list_title clearfix">
+			<h3 class="fl" id="model01">{{.type.Name}}</h3>
+			<div class="subtitle fl">
+				<span>|</span>
+				{{range .textbanner}}
+				<a href="showcentent?id={{.GoodsSKU.Id}}">{{.GoodsSKU.Name}}</a>
+				{{end}}
+			</div>
+			<a href="#" class="goods_more fr" id="fruit_more">查看更多 ></a>
+		</div>
+
+		<div class="goods_con clearfix">
+			<div class="goods_banner fl"><img src="http://192.168.110.111:8888/{{.type.Image}}"></div>
+			<ul class="goods_list fl">
+				{{range .imagebanner}}
+				<li>
+					<h4><a href="#">{{.GoodsSKU.Name}}</a></h4>
+					<a href="/showcentent?id={{.GoodsSKU.Id}}"><img src="http://192.168.110.111:8888/{{.GoodsSKU.Image}}"></a>
+					<div class="prize">¥{{.GoodsSKU.Price}}</div>
+				</li>
+				{{end}}
+			</ul>
+		</div>
+	</div>
+
+{{end}}
