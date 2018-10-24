@@ -36,7 +36,7 @@ func init() {
 	//购物车
 	beego.Router("/goods/cart",&controllers.GoodsController{} ,"get:ShowCart")
 	//我的订单
-	beego.Router("/goods/place_order",&controllers.GoodsController{},"get:ShowplaceOder")
+	beego.Router("/goods/Order",&controllers.GoodsController{},"post:ShowplaceOder")
 	//查看商品详情
 	beego.Router("/showcentent",&controllers.GoodsController{},"get:Showcentent")
 	//查看同一类型的商品
@@ -47,6 +47,14 @@ func init() {
 	beego.Router("/goods/cart",&controllers.CartController{},"post:HandleCart")
 	//改变商品数量
 	beego.Router("/goods/updateCart",&controllers.CartController{},"post:HandleUpdateCart")
+	//删除购物车
+	beego.Router("/goods/deleteCart",&controllers.CartController{},"post:HandleDeleteCart")
+	//提交订单
+	beego.Router("/goods/addOrder",&controllers.CartController{},"post:HandleAddOrder")
+	//付款
+	beego.Router("/goods/pay",&controllers.GoodsController{},"get:HandlePay")
+	//返回数据
+	beego.Router("/goods/payok",&controllers.GoodsController{},"get:ShowPay")
 	beego.InsertFilter("/goods/*",beego.BeforeExec, func(context *context.Context) {
 		userName:=context.Input.Session("userName")
 		if userName==nil {

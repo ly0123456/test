@@ -7,12 +7,23 @@ import (
 	"github.com/gomodule/redigo/redis"
 	"strconv"
 	"math"
+	"github.com/smartwalle/alipay"
+	"fmt"
+
 )
 
 type GoodsController struct {
 	beego.Controller
 }
 
+//获取购物车条目
+func cartCount(this *beego.Controller)(int,error){
+	username:=GetUserName(this)
+	user,err:=GetUser(username.(string))
+	conn,_:=redis.Dial("tcp","192.168.110.111:6379")
+	count,_:=redis.Int(conn.Do("hlen","cart_"+strconv.Itoa(user.Id)))
+	return count,err
+}
 //主页展示
 func (this *GoodsController) ShowIndex() {
 	GetUserName(&this.Controller)
@@ -48,6 +59,11 @@ func (this *GoodsController) ShowIndex() {
 	this.Data["goods"] = goods
 	this.Data["lunbotus"] = lunbotus
 	this.Data["promotionBanner"] = promotionBanner
+	count,err:= cartCount(&this.Controller)
+	if err!=nil{
+		count=0
+	}
+	this.Data["cartcount"]=count
 	this.Data["title"] = "天天生鲜 首页"
 	this.Layout = "layout.html"
 	this.TplName = "index.html"
@@ -84,7 +100,44 @@ func (this *GoodsController) ShowCenter() {
 
 //全部订单
 func (this *GoodsController) ShowOrder() {
-	GetUserName(&this.Controller)
+	unsename:=GetUserName(&this.Controller)
+	user,_:=GetUser(unsename.(string))
+	page,err:=this.GetInt("page")
+	if err!=nil {
+		page=1
+	}
+	pageSize:=2
+	start:=(page-1)*pageSize
+	o:=orm.NewOrm()
+	var goodsInfos []models.OrderInfo
+count,_:=o.QueryTable("OrderInfo").RelatedSel("User").Filter("User__Id",user.Id).Count()
+	o.QueryTable("OrderInfo").RelatedSel("User").Filter("User__Id",user.Id).Limit(pageSize,start).All(&goodsInfos)
+	pagecount:=math.Ceil(float64(count)/float64(pageSize))
+	goods:=make([]map[string]interface{},len(goodsInfos))
+	for i,goodsInfo:=range goodsInfos{
+		var orderGoods []models.OrderGoods
+		o.QueryTable("OrderGoods").RelatedSel("OrderInfo","GoodsSKU").Filter("OrderInfo__Id",goodsInfo.Id).All(&orderGoods)
+		temp:=make(map[string]interface{})
+		temp["goodsInfo"]=goodsInfo
+		temp["orderGoods"]=orderGoods
+		goods[i]=temp
+	}
+	parpage:=page-1
+	if parpage<1 {
+		parpage=1
+	}
+	nextpage:=page+1
+	if nextpage>int(pagecount) {
+		nextpage=int(pagecount)
+	}
+	pages:=showpage(page,int(pagecount))
+	beego.Info(pages)
+	beego.Info(pagecount)
+	this.Data["parpage"]=parpage
+	this.Data["nextpage"]=nextpage
+	this.Data["page"]=page
+	this.Data["pages"]=pages
+	this.Data["goods"]=goods
 	this.Data["active2"] = "active"
 	this.Data["title"] = "全部订单"
 	this.Layout = "layout.html"
@@ -147,18 +200,19 @@ func (this *GoodsController) HandleSite() {
 	zipcode := this.GetString("zipcode")
 	phone := this.GetString("phone")
 	o := orm.NewOrm()
-	var addr models.Address
-	addr.Isdefault = true
-	err := o.Read(&addr, "Isdefault")
-	if err == nil {
-		addr.Isdefault = false
-		o.Update(&addr)
-	}
 	user, err := GetUser(username.(string))
 	if err != nil {
 		beego.Info(err)
 		return
 	}
+	var addr models.Address
+	addr.Isdefault = true
+	o.QueryTable("Address").RelatedSel("User").Filter("User__Id",user.Id).Filter("Isdefault",true).Update(orm.Params{"Isdefault":false})
+	/*err = o.Read(&addr, "Isdefault")
+	if err == nil {
+		addr.Isdefault = false
+		o.Update(&addr)
+	}*/
 	var address models.Address
 	address.User = &user
 	address.Addr = address1
@@ -211,9 +265,42 @@ func (this *GoodsController) ShowCart() {
 
 //我的订单
 func (this *GoodsController) ShowplaceOder() {
-	GetUserName(&this.Controller)
+	userName:=GetUserName(&this.Controller)
+	user,_:=GetUser(userName.(string))
+	skuids:=this.GetStrings("skuid")
+	goods:=make([]map[string]interface{},len(skuids))
+	o:=orm.NewOrm()
+	conn,_:=redis.Dial("tcp","192.168.110.111:6379")
+	totalPrice:=0
+	totalCount:=0
+	for i,skuid:=range skuids  {
+		tmep:=make(map[string]interface{})
+		id,_:=strconv.Atoi(skuid)
+		var goodsSku models.GoodsSKU
+		goodsSku.Id=id
+		o.Read(&goodsSku)
+		tmep["goods"]=goodsSku
+		count,_:=redis.Int(conn.Do("hget","cart_"+strconv.Itoa(user.Id),id))
+		tmep["count"]=count
+		amount:=goodsSku.Price*count
+		tmep["amount"]=amount
+		goods[i]=tmep
+		totalCount+=count
+		totalPrice+=amount
+	}
+	this.Data["goods"]=goods
+	var addrs []models.Address
+	o.QueryTable("Address").RelatedSel("User").Filter("User__Id",user.Id).All(&addrs)
+	this.Data["addrs"]=addrs
+	this.Data["totalCount"]=totalCount
+	this.Data["totalPrice"]=totalPrice
+	youfei:=10
+	this.Data["youfei"]=youfei
+	this.Data["shifukuan"]=totalPrice+youfei
 	this.Data["title"] = "我的订单"
+	this.Data["skuids"]=skuids
 	this.Layout = "layout.html"
+
 	this.TplName = "place_order.html"
 }
 
@@ -345,4 +432,70 @@ func (this *GoodsController) HandleSearch() {
 	this.Data["goods"]=goods
 	this.Layout="layout.html"
 	this.TplName="search.html"
+}
+//去支付
+func (this *GoodsController)HandlePay(){
+	appId:="2016092000557265"
+	aliPublicKey:="MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAywC7gD+vrKqvgGemDzo3bltinzA4qa2sDJMxThEMa3tFikP1Gr9ZnskAT8mc7eb2x5XlbWVyiXeUfOJAplUzgL/a9HemRTRyLbtrPl/TLj5322y1wFqajU4Rt6MWLvu8wcCdaIZuLwYfbzShfHA5S2DfxgJF0XkOMsYitrosvtKzR78CE2eLpAlfitAKTYg8zart5sUHNXjV+tfuNKTyWiWjLCOjFHVUgwkAJjajU+iaKraeQCYaZuHaCRAIiwq3kI6q6XL8UG8VCZaf8j0P/cdl3M4f/gR5E3S+LkG70E6uCwrVhKJSG8nf6NtAP+cIs8sUYv8wpr4VwKWTZhNVOwIDAQAB"
+	privateKey:="MIIEpQIBAAKCAQEAuGDcHWdHNLS25wL015JizgKgXU5RHdSKYnRoQLexQCXb8dTg"+
+		"2kF8EZ4PUhwJ0s9fKu7RmHDT1K7sVdQ+WoTGmT5vPjqrKTGiNi0yLavKdZziUEie"+
+		"nuChHzCVCm7roC89hCB/6qHVL92NCaqSwOaxdDEmCy3xXMklGrX+X6Zj9IU6WqSj"+
+		"etqGYLtJ0Q64czQA2yM7i92NzaDtwqd4Fl40Ahb9WD+hr0BCOCskdepqfs5P6k+q"+
+		"cz3FPJonIrYk1G8gGGGL6tg9pcD6Lmvr0mWeecM1uEjVwN+gZeGPzJ9ccViqEP3V"+
+		"Pd1Xe665IOwfRm67MaX16wfbkfpOZ7kOj0l+WQIDAQABAoIBAQCJ/TO/bcQE1hrs"+
+		"2XGUxKHdvGl4a1yaDq9i7+v2Q4QMlkj9vGxr7AaGyNx+fy168GgxIXsLs6VVz3Rg"+
+		"5++inyxjFC79S7s9oT/dfAXJ2IA1dayKmU7daRAs35crr8f4omJPuGMDnwqGQDGF"+
+		"wnsCk6TLaN0oEMJKxt9WFk7CFy1Hmgc8pNd1vnMFpNkztHGPMwCZFJ24+SQRCqAI"+
+		"iAvjbdGS1S7DhxiChcdImzP381Da+XVMnBJlQsaFC7NdiL13XMp4fPRQYyiRPm/8"+
+		"mtERWfYJcvTO8+/4ShrYWYjz72HPWclIHBdv12uU/jhBKDm8H0bV9JpM2yhh1EXf"+
+		"YduyqpmBAoGBAO/zgUaFzsuHXwz150FHUjpuxE04wqcuwN/PaO7z1qu3cUHOtX6J"+
+		"s7tXbq7a8HSnhKWSosLaJ9IwwoqCJzHjGKVT4Naln50nzdgkt3K5L5XYE2heZ0Jn"+
+		"u25F6Uao49aSz0a7LQE3RR2oT2EBPirjgkXX2B75z51hx4Sh57TBrDe1AoGBAMS1"+
+		"0za85W/AjvngzaotUc4LDe62h5rIODGXrNRRST/ijwJu/pzapj0QPYrCOtfpWwi4"+
+		"CfCm4TFt3xV1skIRZNVuku4SMwbaMRdKfn721LS6W9eHg/dptRHAfrrkuPIliw4P"+
+		"w7gyRr51VKtYQUsBYPCAM2LwcIsIgb+bcBZYYAqVAoGBAO+sRUNg4jcPh1SVxqDA"+
+		"kZTGEROlD2EYZRTowkJzkshAWkNGKqky+DC3W1oSXD3ZGbicaDDC4SWlCJx69pVw"+
+		"5aw1xQ4BrxW1rXko64gPC0Xb5z7HlNKSdHfoIuMuTS2FxL48te5R+5ptBKS7LhJ+"+
+		"3x/OQhRmqAbmpPiJE7zL+q5FAoGAFqS3g32LC6omyyzNf+FnoUg0el4YjgCuN0c2"+
+		"ZdpVjD0QKT+Nn5Crwiu0adyh2WjLSd2lh0Yudfony9iYhHJsIQVxdGYz6X4EWKIC"+
+		"narcIVGycMTws/I/HaQC8pCRmY4oy52U8gcXjaUD8hVerruh5Q1c3O7AhcCc7ul9"+
+		"pZTWuWECgYEA1l2UfH37W6ZtV7jcCiG7Y1uX6fRPcMjKngyOHFE56pagjgFZx0AU"+
+		"7R6J7VmJdsUZXzGhvJKwBYSeLRGcIh12GAJ7eQLBpYrmS67d5azuMUh0YyKlJ7dK"+
+		"LagMHqHf6W7x/AKXS6w2p6SuCX7rSgKlT+TZPUfSeQ4LD3FanED0phs="
+	var client = alipay.New(appId, aliPublicKey, privateKey, false)
+	orderId := this.GetString("orderId")
+	totalPrice := this.GetString("totalPrice")
+	//alipay.trade.page.pay
+	var p = alipay.AliPayTradePagePay{}
+	p.NotifyURL = "http://192.168.110.81:8080/user/payOk"
+	p.ReturnURL = "http://192.168.110.111:8080/goods/payok"
+	p.Subject = "天天生鲜"
+	p.OutTradeNo = orderId
+	p.TotalAmount = totalPrice
+	p.ProductCode = "FAST_INSTANT_TRADE_PAY"
+
+	var url, err = client.TradePagePay(p)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	var payURL = url.String()
+
+	this.Redirect(payURL,302)
+
+}
+//支付返回
+func (this *GoodsController)ShowPay() {
+	orderid:=this.GetString("out_trade_no")
+	if orderid=="" {
+		beego.Info("返回数据错误")
+		return
+	}
+	o:=orm.NewOrm()
+	count,_:=o.QueryTable("OrderInfo").Filter("OrderId",orderid).Update(orm.Params{"Orderstatus":2})
+	if count==0 {
+		beego.Info("更新数据失败")
+		return
+	}
+	this.Redirect("/goods/user_center_order",302)
 }
